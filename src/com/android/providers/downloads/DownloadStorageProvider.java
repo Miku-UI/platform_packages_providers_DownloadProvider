@@ -47,6 +47,7 @@ import android.provider.DocumentsContract.Document;
 import android.provider.DocumentsContract.Path;
 import android.provider.DocumentsContract.Root;
 import android.provider.Downloads;
+import android.provider.Flags;
 import android.provider.MediaStore;
 import android.provider.MediaStore.DownloadColumns;
 import android.text.TextUtils;
@@ -584,6 +585,13 @@ public class DownloadStorageProvider extends FileSystemProvider {
         return DocumentsContract.buildChildDocumentsUri(AUTHORITY, docId);
     }
 
+    @Override
+    protected boolean isTrashSupported(@NonNull File document) {
+        // Called by FileSystemProvider when the document is a RawDocument.
+        // Trash is enabled by default for all documents within the Downloads root.
+        return Flags.enableDocumentsTrashApi();
+    }
+
     private static boolean isMediaMimeType(String mimeType) {
         return MediaFile.isImageMimeType(mimeType) || MediaFile.isVideoMimeType(mimeType)
                 || MediaFile.isAudioMimeType(mimeType) || MediaFile.isDocumentMimeType(mimeType);
@@ -654,6 +662,10 @@ public class DownloadStorageProvider extends FileSystemProvider {
                     return;
                 }
                 extraFlags = Document.FLAG_SUPPORTS_RENAME;  // only successful is non-partial
+                // Only successful items can be trashed.
+                if (Flags.enableDocumentsTrashApi()) {
+                    extraFlags |= Document.FLAG_SUPPORTS_TRASH;
+                }
                 break;
             case DownloadManager.STATUS_PAUSED:
                 summary = getContext().getString(R.string.download_queued);
@@ -929,6 +941,8 @@ public class DownloadStorageProvider extends FileSystemProvider {
                 mediaCursor.getColumnIndex(DownloadColumns.DATE_MODIFIED)) * 1000;
         final boolean isPending = mediaCursor.getInt(
                 mediaCursor.getColumnIndex(DownloadColumns.IS_PENDING)) == 1;
+        final boolean isTrashed = mediaCursor.getInt(
+                mediaCursor.getColumnIndex(DownloadColumns.IS_TRASHED)) == 1;
 
         int extraFlags = isPending ? Document.FLAG_PARTIAL : 0;
         if (Document.MIME_TYPE_DIR.equals(mimeType)) {
@@ -936,6 +950,14 @@ public class DownloadStorageProvider extends FileSystemProvider {
         }
         if (!isPending) {
             extraFlags |= Document.FLAG_SUPPORTS_RENAME;
+        }
+
+        // When the documents trash API is enabled, set the appropriate capability flag.
+        // Trashed documents should support RESTORE, while all other documents support TRASH.
+        if (Flags.enableDocumentsTrashApi()) {
+            extraFlags |= (isTrashed)
+                    ? Document.FLAG_SUPPORTS_RESTORE
+                    : Document.FLAG_SUPPORTS_TRASH;
         }
 
         includeDownload(result, docId, displayName, null /* description */, size, mimeType,
